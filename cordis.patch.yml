@@ -1,0 +1,94 @@
+# ============================================================================
+# dsh-win-notify —— DSH bundle patch
+# ============================================================================
+# 这是插件的「挂载声明」。DSH 启动时按 bundle 层栈叠加各插件 patch，本文件把
+# 插件插入 profile 的配置树。
+#
+# 行的 `id` 必须与 lib/index.mjs 里的 `export const name` 完全一致；
+# `name` 必须是 npm 包名（这里是 dsh-win-notify）。
+#
+# 安装：
+#   dsh plugin --profile desktop add ./dsh-win-notify-1.0.0.tgz
+# 或在桌面端「设置 → 插件」里安装本目录。
+#
+# ⚠️ profile 自己的 cordis.patch.yml 里按 id 覆盖本行时，config 是「整段替换」
+# 而不是深合并 —— 必须重述想保留的键。
+#
+# 日常不需要手改这个文件：应用界面右上角的「通知」按钮可以直接开关这些项，
+# 改动会写进 profile 的 cordis.patch.yml 并立即生效。这里列出全部键是为了
+# 让你知道有哪些可调项、默认值是什么。
+# ============================================================================
+
+- insert:
+    - id: dsh-win-notify
+      name: dsh-win-notify
+      config:
+        # —— 基本 ——
+        enabled: true
+        debug: false
+
+        # —— 哪些情况通知（界面上可逐项开关）——
+        notifyApproval: true      # 需要你审批（真正在等你点时）
+        notifyQuestion: true      # 智能体用 ask_user_question 等你回答
+        notifyDone: true          # 本轮任务完成
+        notifyError: true         # 任务出错
+        notifyBlocked: true       # 任务被阻止
+        notifyMaxTokens: true     # 输出被截断
+        notifyAborted: true       # 非用户原因的中断
+        notifySubagents: false    # 子代理会话是否也通知
+        notifyUserAbort: false    # 你自己按「停止」导致的 aborted 是否通知
+        # 额外屏蔽（逗号分隔）：approval,question,done,blocked,error,max-tokens,aborted
+        disabledHooks: ""
+
+        # —— 弹窗行为（界面上可开关）——
+        quietWhenFocused: true    # DSH 窗口在前台时不弹
+        showWhenDnd: false        # 专注助手 / 免打扰时是否仍弹
+        # 点击通知时把桌面端窗口调到前台
+        clickToFocus: true
+
+        # —— 判定「窗口在前台」的依据 ——
+        foregroundProcesses: "DeepSeek Harness"
+        foregroundTitles: "DeepSeek Harness"
+
+        # —— 通知归属 ——
+        # DSH 自己的 AppUserModelID，名字显示为 "DeepSeek Harness"，
+        # 且会出现在「设置 → 系统 → 通知」的应用列表里。
+        # 需要在 Start 菜单快捷方式上登记同名属性，见 tools/setup-windows.ps1。
+        appId: "electron.app.DeepSeek Harness"
+        # 通知正文里的大图标：默认不显示（头部已经有应用名和小图标了）。
+        # 填文件路径显示该图；填 bundled 用自带的 assets/toast-logo.png。
+        iconPath: ""
+        # 点击通知打开的地址；实际优先用宿主注入的 DSH_WEB_URL
+        # 点击通知打开的目标。dsh://open 是桌面端自己注册并处理的协议，
+        # 会把窗口恢复并聚焦；别改成 http://127.0.0.1:19387/ ——
+        # 那会交给默认浏览器打开，而且该地址没有鉴权 token，会返回 401。
+        focusUrl: "dsh://open"
+
+        # —— 防打扰 / 限流 ——
+        # 审批/提问先静候这么久仍未决才弹。
+        # 为什么需要：DSH 在审批策略为 never 时会「问了就立刻自动拒绝」，
+        # 那种情况不是真人在等你，不该弹。
+        approvalDelayMs: 1200
+        questionDelayMs: 1200
+        # rateLimitMs 窗口内最多弹 rateLimitMax 条（0 = 不限流）
+        rateLimitMs: 60000
+        rateLimitMax: 6
+        maxConcurrent: 2          # 同时最多几个 PowerShell 助手进程
+        helperTimeoutMs: 15000
+
+        # —— 文案模板 ——
+        # 占位符：%TITLE% %TOOL% %REASON% %TURN% %REPLY% %ERROR% %AGENT%
+        approvalTitle: "需要你批准"
+        approvalBody: "%TOOL% %REASON% — %TITLE%"
+        questionTitle: "智能体在等你回答"
+        questionBody: "%TITLE%"
+        doneTitle: "任务完成"
+        doneBody: "%TITLE%"
+        blockedTitle: "任务被阻止"
+        blockedBody: "%REASON% — %TITLE%"
+        errorTitle: "任务出错"
+        errorBody: "%ERROR% — %TITLE%"
+        maxTokensTitle: "输出被截断"
+        maxTokensBody: "达到最大输出长度 — %TITLE%"
+        abortedTitle: "任务被中断"
+        abortedBody: "%REASON% — %TITLE%"

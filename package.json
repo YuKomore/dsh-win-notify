@@ -1,0 +1,53 @@
+{
+  "name": "dsh-win-notify",
+  "version": "1.0.0",
+  "description": "DeepSeek Harness 桌面端 Windows 原生系统通知插件：审批请求、智能体提问、任务完成、出错/中断时弹出系统 Toast，窗口在前台时自动静默",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "notification",
+    "toast",
+    "windows"
+  ],
+  "type": "module",
+  "main": "lib/index.mjs",
+  "exports": {
+    ".": {
+      "default": "./lib/index.mjs"
+    },
+    "./toast": "./lib/toast.mjs",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "assets",
+    "tools",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "identity": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/register-app-identity.ps1",
+    "test": "node test/smoke.mjs && node test/settings.mjs && node test/panel-browser.mjs",
+    "test:toast": "node test/smoke.mjs --toast",
+    "test:delivery": "node test/delivery.mjs",
+    "test:settings": "node test/settings.mjs",
+    "test:http": "node test/http-e2e.mjs",
+    "test:panel": "node test/panel-browser.mjs",
+    "test:integration": "node test/settings-integration.mjs",
+    "test:preview": "node test/preview.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "win32"
+  ],
+  "license": "MIT",
+  "private": true
+}

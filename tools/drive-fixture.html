@@ -1,0 +1,150 @@
+/**
+ * Drive `assets/panel.js` inside a real browser and emit observations as JSON.
+ *
+ * `--dump-dom` only serialises the light DOM, and the panel lives inside a shadow
+ * root, so the meaningful state is invisible to it. This harness loads the
+ * fixture in an iframe, clicks the launcher, and writes a JSON report into a
+ * <pre> that `--dump-dom` can see. `test/panel-browser.mjs` asserts against it.
+ *
+ * Kept as a page (not a Node test) because both bugs it guards against were
+ * invisible to unit tests: one was a geometry mismatch against a sibling
+ * rendered by the app's preload, the other an exception thrown before render.
+ */
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>panel driver</title></head>
+<body>
+<pre id="report">{"status":"running"}</pre>
+<iframe id="frame" src="../assets/fixture.html" style="width:1100px;height:700px;border:1px solid #999"></iframe>
+<script>
+const report = document.getElementById('report');
+const out = { status: 'ok', errors: [] };
+
+/**
+ * Resolve after a delay, so the panel's own timers can run.
+ *
+ * @param {number} ms - Milliseconds.
+ * @returns {Promise<void>} Resolves after the delay.
+ */
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Publish the report so the host can read it out of the serialised DOM.
+ */
+function publish() {
+  report.textContent = JSON.stringify(out, null, 1);
+}
+
+window.addEventListener('load', async () => {
+  try {
+    const frame = document.getElementById('frame');
+    const win = frame.contentWindow;
+    const doc = frame.contentDocument;
+
+    // Capture anything the panel logs or throws: it swallows errors in
+    // production, and a silent failure is exactly what must not regress.
+    const originalError = win.console.error;
+    win.console.error = (...args) => {
+      out.errors.push('console.error: ' + args.map(String).join(' '));
+      originalError.apply(win.console, args);
+    };
+    win.addEventListener('error', (e) => {
+      out.errors.push('window.error: ' + (e.message || '') + ' @' + (e.lineno || ''));
+    });
+    win.addEventListener('unhandledrejection', (e) => {
+      out.errors.push('unhandledrejection: ' + String((e.reason && e.reason.message) || e.reason));
+    });
+
+    const host = doc.querySelector('#dsh-win-notify-root');
+    out.hostPresent = Boolean(host);
+    if (!host) { out.status = 'no-host'; publish(); return; }
+
+    const root = host.shadowRoot;
+    out.shadowRoot = Boolean(root);
+    const launch = root.querySelector('.launch');
+    const panel = root.querySelector('.panel');
+    out.launchPresent = Boolean(launch);
+    out.panelPresent = Boolean(panel);
+    out.launchHidden = launch ? launch.hidden : null;
+    out.launchText = launch ? launch.textContent.trim() : null;
+    out.launchClass = launch ? launch.className : null;
+    // The label must be text only: 应用 / 编辑 carry no icon, so a bell here read
+    // as foreign. Also record the accessible state, which replaces the icon as
+    // the only visual cue that the panel is open.
+    out.launchChildElements = launch ? launch.children.length : null;
+    out.launchSvgCount = launch ? launch.querySelectorAll('svg').length : null;
+    out.launchAriaExpanded = launch ? launch.getAttribute('aria-expanded') : null;
+
+    // --- alignment against the shell's own caption buttons ---
+    const menuHost = doc.querySelector('[data-windows-menu]');
+    out.menuHostPresent = Boolean(menuHost);
+    if (menuHost && menuHost.shadowRoot && launch) {
+      const siblings = menuHost.shadowRoot.querySelectorAll('button');
+      out.shellButtonCount = siblings.length;
+      const sibling = siblings[siblings.length - 1];
+      const props = ['font-size', 'font-family', 'color', 'height', 'padding-left',
+        'padding-right', 'border-radius', 'background-color'];
+      out.styles = {};
+      const theirStyle = win.getComputedStyle(sibling);
+      const ourStyle = win.getComputedStyle(launch);
+      for (const p of props) {
+        out.styles[p] = { shell: theirStyle.getPropertyValue(p), ours: ourStyle.getPropertyValue(p) };
+      }
+      const a = sibling.getBoundingClientRect();
+      const b = launch.getBoundingClientRect();
+      out.geometry = {
+        shell: { left: a.left, right: a.right, top: a.top, height: a.height },
+        ours: { left: b.left, right: b.right, top: b.top, height: b.height },
+        // Horizontal gap must be ~0 (a 2px flex gap is acceptable) and the
+        // vertical centres must line up.
+        gap: b.left - a.right,
+        centreDelta: (b.top + b.height / 2) - (a.top + a.height / 2),
+      };
+    }
+
+    // --- click behaviour ---
+    launch.dispatchEvent(new win.MouseEvent('click', { bubbles: true, cancelable: true }));
+    out.openAfterClick = panel.classList.contains('open');
+    await wait(700);
+    out.openAfterWait = panel.classList.contains('open');
+    out.panelChildren = panel.children.length;
+    out.rowCount = panel.querySelectorAll('.row').length;
+    out.switchCount = panel.querySelectorAll('.sw').length;
+    out.textLength = panel.textContent.trim().length;
+    out.hasTestButton = Array.from(panel.querySelectorAll('.ft button')).some(
+      (b) => b.textContent.trim() === '发送测试通知',
+    );
+    // The settings-file line was removed from the UI; assert it stays gone.
+    // (`cordis.patch.yml` itself still appears in the status hint, which is
+    // intentional, so match the removed label rather than the path.)
+    out.mentionsSettingsFilePath = /配置文件/.test(panel.textContent);
+    out.ariaExpandedWhenOpen = launch.getAttribute('aria-expanded');
+    const rect = panel.getBoundingClientRect();
+    out.panelRect = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+    out.panelVisible = win.getComputedStyle(panel).display !== 'none' && rect.width > 0 && rect.height > 0;
+
+    // --- toggle a switch so the POST path is exercised ---
+    const row = panel.querySelector('.row');
+    if (row) {
+      const before = row.classList.contains('on');
+      row.dispatchEvent(new win.MouseEvent('click', { bubbles: true, cancelable: true }));
+      await wait(400);
+      out.toggle = {
+        before,
+        after: row.classList.contains('on'),
+        posted: (win.__DWN_TEST__ && win.__DWN_TEST__.posted) || [],
+        status: (panel.querySelector('.note') || {}).textContent || '',
+      };
+    }
+
+    // --- escaping: host text must never become markup ---
+    out.usesTextContent = panel.innerHTML.indexOf('<script') === -1;
+  } catch (error) {
+    out.status = 'threw';
+    out.errors.push('driver: ' + String((error && error.stack) || error));
+  }
+  publish();
+});
+</script>
+</body>
+</html>
